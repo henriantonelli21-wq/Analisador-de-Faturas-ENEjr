@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Analisador de Faturas de Energia</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.0/tesseract.min.js"></script>
+<style>
+  :root{
+    --ink:#0B2545;
+    --ink-soft:#3D5A80;
+    --bg:#F6F7FB;
+    --surface:#FFFFFF;
+    --border:#E2E6ED;
+    --amber:#C9650D;
+    --amber-bg:#FCEEDE;
+    --red:#A32D2D;
+    --red-bg:#FBEAEA;
+    --green:#27500A;
+    --green-bg:#EDF5E1;
+    --blue:#0C447C;
+    --blue-bg:#E6F1FB;
+    --mono: 'JetBrains Mono', monospace;
+    --display: 'Space Grotesk', sans-serif;
+    --body: 'Inter', sans-serif;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--ink); font-family:var(--body);
+    line-height:1.5;
+  }
+  .wrap{max-width:880px; margin:0 auto; padding:48px 24px 100px;}
+  header{display:flex; align-items:center; gap:14px; margin-bottom:8px;}
+  .bolt{
+    width:38px; height:38px; border-radius:10px; background:var(--ink);
+    display:flex; align-items:center; justify-content:center; flex-shrink:0;
+  }
+  .bolt svg{width:20px; height:20px;}
+  h1{font-family:var(--display); font-weight:700; font-size:23px; margin:0; letter-spacing:-0.01em;}
+  .tagline{color:var(--ink-soft); font-size:14px; margin:6px 0 36px; max-width:560px;}
+
+  .panel{
+    background:var(--surface); border:1px solid var(--border); border-radius:14px;
+    padding:28px; margin-bottom:20px;
+  }
+  .dropzone{
+    border:1.5px dashed #C7CEDB; border-radius:12px; padding:40px 20px; text-align:center;
+    cursor:pointer; transition:border-color .15s, background .15s;
+  }
+  .dropzone:hover, .dropzone.drag{ border-color:var(--ink); background:#FAFBFD; }
+  .dropzone svg{width:30px; height:30px; color:var(--ink-soft); margin-bottom:10px;}
+  .dropzone p{margin:0; font-size:14.5px; color:var(--ink-soft);}
+  .dropzone .accent{color:var(--ink); font-weight:600;}
+  #fileInput{display:none;}
+
+  .status{
+    display:none; align-items:center; gap:12px; margin-top:18px; font-size:13.5px; color:var(--ink-soft);
+  }
+  .status.active{display:flex;}
+  .spinner{
+    width:16px; height:16px; border-radius:50%; border:2px solid #DDE3EE; border-top-color:var(--ink);
+    animation:spin .8s linear infinite; flex-shrink:0;
+  }
+  @keyframes spin{to{transform:rotate(360deg);}}
+  progress{width:100%; height:6px; accent-color:var(--ink); border-radius:6px;}
+
+  .results{display:none;}
+  .results.active{display:block;}
+
+  .summary-grid{display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin-bottom:22px;}
+  .metric{background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:14px 16px;}
+  .metric .n{font-family:var(--mono); font-size:24px; font-weight:700;}
+  .metric .l{font-size:10.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--ink-soft); margin-top:2px;}
+  .metric.crit .n{color:var(--red);}
+  .metric.alert .n{color:var(--amber);}
+  .metric.opp .n{color:var(--green);}
+
+  table.dados{width:100%; border-collapse:collapse; font-size:13px;}
+  table.dados td{padding:7px 4px; border-bottom:1px solid var(--border);}
+  table.dados td:first-child{color:var(--ink-soft); width:50%;}
+  table.dados td:last-child{font-family:var(--mono); font-weight:500;}
+
+  .section-title{
+    font-family:var(--display); font-weight:600; font-size:15px; margin:30px 0 14px;
+    display:flex; align-items:center; gap:8px;
+  }
+  .dot{width:9px; height:9px; border-radius:50%; flex-shrink:0;}
+  .dot.crit{background:var(--red);} .dot.alert{background:var(--amber);}
+  .dot.opp{background:var(--green);} .dot.info{background:var(--blue);}
+
+  .achado{
+    border-left:3px solid var(--border); background:var(--surface); border:1px solid var(--border);
+    border-left-width:3px; border-radius:10px; padding:14px 16px; margin-bottom:10px;
+  }
+  .achado.CRITICO{border-left-color:var(--red);}
+  .achado.ALERTA{border-left-color:var(--amber);}
+  .achado.OPORTUNIDADE{border-left-color:var(--green);}
+  .achado.INFO{border-left-color:var(--blue);}
+  .achado-head{display:flex; align-items:center; gap:8px; margin-bottom:6px;}
+  .tag{font-size:10px; font-weight:700; padding:2px 8px; border-radius:20px; letter-spacing:.03em;}
+  .tag.CRITICO{background:var(--red-bg); color:var(--red);}
+  .tag.ALERTA{background:var(--amber-bg); color:var(--amber);}
+  .tag.OPORTUNIDADE{background:var(--green-bg); color:var(--green);}
+  .tag.INFO{background:var(--blue-bg); color:var(--blue);}
+  .achado .cat{font-size:11px; color:var(--ink-soft);}
+  .achado h4{margin:0 0 5px; font-size:14.5px; font-family:var(--display); font-weight:600;}
+  .achado p{margin:0; font-size:13.5px; color:#33415C;}
+  .achado .rec{margin-top:8px; background:var(--bg); border-radius:8px; padding:8px 10px; font-size:13px;}
+  .achado .eco{margin-top:6px; font-size:12.5px; color:var(--green); font-weight:600;}
+
+  .toolbar{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+  .toolbar button{
+    font-family:var(--body); font-size:13px; font-weight:600; color:var(--ink); background:var(--surface);
+    border:1px solid var(--border); border-radius:8px; padding:9px 16px; cursor:pointer;
+  }
+  .toolbar button:hover{background:var(--bg);}
+  .toolbar .new{color:var(--ink-soft); border:none; background:none; text-decoration:underline; padding:9px 4px;}
+
+  .disclaimer{font-size:11.5px; color:var(--ink-soft); margin-top:28px; line-height:1.6; border-top:1px solid var(--border); padding-top:14px;}
+
+  @media print{
+    body{background:#fff;}
+    .panel.upload-panel, .toolbar{display:none !important;}
+    .wrap{padding:0 12px;}
+    .achado{break-inside:avoid;}
+  }
+  @media (max-width:640px){
+    .summary-grid{grid-template-columns:repeat(2,1fr);}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="bolt">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#F6F7FB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+    </div>
+    <h1>Analisador de Faturas de Energia</h1>
+  </header>
+  <p class="tagline">Envie um PDF ou print de uma fatura de qualquer distribuidora. A leitura e a análise rodam aqui no seu navegador — nada é enviado para servidor algum.</p>
+
+  <div class="panel upload-panel">
+    <div class="dropzone" id="dropzone">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      <p><span class="accent">Clique para enviar</span> ou arraste o arquivo aqui</p>
+      <p style="margin-top:4px; font-size:12px;">PDF, JPG ou PNG</p>
+    </div>
+    <input type="file" id="fileInput" accept=".pdf,.jpg,.jpeg,.png,.webp">
+    <div class="status" id="status">
+      <div class="spinner"></div>
+      <span id="statusText">Lendo arquivo...</span>
+    </div>
+  </div>
+
+  <div class="results" id="results">
+    <div class="toolbar">
+      <button onclick="window.print()">Baixar relatório em PDF</button>
+      <button class="new" onclick="location.reload()">Analisar outra fatura</button>
+    </div>
+
+    <div class="summary-grid" id="summaryGrid"></div>
+
+    <table class="dados" id="dadosTable"></table>
+
+    <div id="achadosContainer"></div>
+
+    <div class="disclaimer">
+      Relatório gerado automaticamente a partir da leitura da fatura informada. Os valores e percentuais
+      de economia são estimativas e não substituem uma análise técnica detalhada ou simulação formal junto
+      à distribuidora/comercializadora. Em caso de suspeita de erro de cobrança, recomenda-se contestação
+      formal junto à distribuidora e/ou à ANEEL.
+    </div>
+  </div>
+
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js";
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const statusBox = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const resultsBox = document.getElementById('results');
+const uploadPanel = document.querySelector('.upload-panel');
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+dropzone.addEventListener('drop', e => {
+  e.preventDefault(); dropzone.classList.remove('drag');
+  if (e.dataTransfer.files.length) handleFile(e.dataTransfer.files[0]);
+});
+fileInput.addEventListener('change', e => { if (e.target.files.length) handleFile(e.target.files[0]); });
+
+function setStatus(msg){
+  statusBox.classList.add('active');
+  statusText.textContent = msg;
+}
+
+async function handleFile(file){
+  resultsBox.classList.remove('active');
+  setStatus('Lendo arquivo...');
+  try{
+    let texto = '';
+    const ext = file.name.split('.').pop().toLowerCase();
+    if (ext === 'pdf'){
+      texto = await extrairTextoPDF(file);
+    } else {
+      setStatus('Reconhecendo texto da imagem (OCR)...');
+      texto = await ocrImagem(file);
+    }
+    setStatus('Analisando dados da fatura...');
+    const fatura = parseFatura(texto);
+    const achados = analisar(fatura);
+    renderReport(fatura, achados);
+    uploadPanel.style.display = 'none';
+    resultsBox.classList.add('active');
+    statusBox.classList.remove('active');
+  } catch(err){
+    console.error(err);
+    setStatus('Erro ao processar o arquivo: ' + err.message);
+  }
+}
+
+async function extrairTextoPDF(file){
+  const buf = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({data: buf}).promise;
+  let texto = '';
+  for (let i = 1; i <= pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    const content = await page.getTextContent();
+    texto += content.items.map(it => it.str).join(' ') + '\n';
+  }
+  if (texto.trim().length >= 150) return texto;
+
+  // PDF provavelmente escaneado -> OCR página a página
+  setStatus('Fatura parece ser uma imagem escaneada, rodando OCR...');
+  let textoOcr = '';
+  for (let i = 1; i <= pdf.numPages; i++){
+    const page = await pdf.getPage(i);
+    const viewport = page.getViewport({scale: 2.2});
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+    setStatus(`OCR na página ${i} de ${pdf.numPages}...`);
+    const { data: { text } } = await Tesseract.recognize(canvas, 'por');
+    textoOcr += text + '\n';
+  }
+  return textoOcr;
+}
+
+async function ocrImagem(file){
+  const { data: { text } } = await Tesseract.recognize(file, 'por', {
+    logger: m => { if (m.status === 'recognizing text') setStatus(`Reconhecendo texto... ${Math.round(m.progress*100)}%`); }
+  });
+  return text;
+}
+
+// ---------- PARSING ----------
+
+const DISTRIBUIDORAS = {
+  "CPFL": ["cpfl", "companhia paulista de força e luz"],
+  "ENEL": ["enel distribuição", "enel sp", "enel rj", "enel ce", "enel go"],
+  "CEMIG": ["cemig"],
+  "LIGHT": ["light s.a", "light serviços"],
+  "COPEL": ["copel"],
+  "CELESC": ["celesc"],
+  "COELBA": ["coelba", "neoenergia coelba"],
+  "EQUATORIAL": ["equatorial"],
+  "ENERGISA": ["energisa"],
+  "CEEE / RGE": ["ceee", "rge"],
+  "EDP": ["edp espírito santo", "edp são paulo", "edp brasil"],
+  "AMAZONAS ENERGIA": ["amazonas energia"],
+  "CELPE": ["celpe", "neoenergia pernambuco"],
+  "COSERN": ["cosern", "neoenergia cosern"],
+};
+
+function num(s){
+  if (!s) return null;
+  s = s.trim().replace(/\./g, '').replace(',', '.');
+  const v = parseFloat(s);
+  return isNaN(v) ? null : v;
+}
+
+function buscar(padrao, texto){
+  const m = texto.match(padrao);
+  return m ? m[1].trim() : null;
+}
+
+function parseFatura(textoOriginal){
+  const texto = textoOriginal;
+  const textoLower = texto.toLowerCase();
+  const f = {
+    distribuidora: null, uf: null, mesReferencia: null, dataVencimento: null,
+    grupo: 'DESCONHECIDO', subgrupo: null, modalidade: 'DESCONHECIDA', ligacao: 'DESCONHECIDA',
+    consumoKwh: null, demandaContratadaKw: null, demandaMedidaKw: null, ultrapassagemKw: null,
+    energiaReativaKvarh: null, fatorPotencia: null, valorCobradoReativo: null,
+    bandeira: 'DESCONHECIDA', valorBandeira: null,
+    icmsAliquota: null, multa: null, juros: null,
+    possuiGeracaoDistribuida: false,
+    valorTotal: null, historico: [], confianca: 0
+  };
+
+  for (const [nome, padroes] of Object.entries(DISTRIBUIDORAS)){
+    if (padroes.some(p => textoLower.includes(p))) { f.distribuidora = nome; break; }
+  }
+  const ufMatch = texto.match(/\b(AC|AL|AP|AM|BA|CE|DF|ES|GO|MA|MT|MS|MG|PA|PB|PR|PE|PI|RJ|RN|RS|RO|RR|SC|SP|SE|TO)\b/);
+  f.uf = ufMatch ? ufMatch[1] : null;
+
+  const venc = buscar(/vencimento[:\s]*([0-3]?\d\/[01]?\d\/\d{2,4})/i, texto);
+  f.dataVencimento = venc || null;
+
+  let consumo = buscar(/consumo[^\n]*?([\d.,]+)\s*kwh/i, texto);
+  if (!consumo) consumo = buscar(/energia\s+el[ée]trica[^\n]*?([\d.,]+)\s*kwh/i, texto);
+  f.consumoKwh = num(consumo);
+
+  f.demandaContratadaKw = num(buscar(/demanda\s+contratad[ao][^\d\n]*?([\d.,]+)\s*kw/i, texto));
+  f.demandaMedidaKw = num(buscar(/demanda\s+(?:medid[ao]|registrada|faturad[ao])[^\d\n]*?([\d.,]+)\s*kw/i, texto));
+  f.ultrapassagemKw = num(buscar(/ultrapassagem[^\d\n]*?([\d.,]+)\s*kw/i, texto));
+
+  f.energiaReativaKvarh = num(buscar(/(?:energia\s+reativa|reativo\s+exced)[^\d\n]*?([\d.,]+)\s*kvarh/i, texto));
+  const fpRaw = num(buscar(/fator\s+de\s+pot[êe]ncia[^\d\n]*?([\d.,]+)/i, texto));
+  f.fatorPotencia = fpRaw !== null ? (fpRaw > 1 ? fpRaw / 100 : fpRaw) : null;
+  f.valorCobradoReativo = num(buscar(/(?:energia\s+reativa|ufer)[^\n]*?r\$\s*([\d.,]+)/i, texto));
+
+  if (/bandeira\s+vermelha[^\n]*pat/i.test(texto) || /vermelha\s*2/i.test(texto)) f.bandeira = 'VERMELHA_P2';
+  else if (/bandeira\s+vermelha/i.test(texto)) f.bandeira = 'VERMELHA_P1';
+  else if (/bandeira\s+amarela/i.test(texto)) f.bandeira = 'AMARELA';
+  else if (/bandeira\s+verde/i.test(texto)) f.bandeira = 'VERDE';
+  else if (/escassez\s+h[íi]drica/i.test(texto)) f.bandeira = 'ESCASSEZ_HIDRICA';
+
+  if (/\bgrupo\s*a\b|alta\s+tens[ãa]o/i.test(texto)) f.grupo = 'A';
+  else if (/\bgrupo\s*b\b|baixa\s+tens[ãa]o/i.test(texto)) f.grupo = 'B';
+  else f.grupo = f.demandaContratadaKw ? 'A' : 'B';
+
+  if (f.grupo === 'B'){
+    if (/\bb1\b|resid/i.test(texto)) f.subgrupo = 'B1';
+    else if (/\bb2\b|rural/i.test(texto)) f.subgrupo = 'B2';
+    else if (/\bb3\b|comercial/i.test(texto)) f.subgrupo = 'B3';
+    else if (/\bb4\b|ilumina[çc][ãa]o\s+p[úu]blica/i.test(texto)) f.subgrupo = 'B4';
+  }
+
+  if (/tarifa\s+branca/i.test(texto)) f.modalidade = 'BRANCA';
+  else if (/modalidade\s+azul|tarifa\s+azul/i.test(texto)) f.modalidade = 'AZUL';
+  else if (/modalidade\s+verde|tarifa\s+verde/i.test(texto)) f.modalidade = 'VERDE';
+  else if (f.grupo === 'B') f.modalidade = 'CONVENCIONAL';
+
+  if (/trif[áa]sic/i.test(texto)) f.ligacao = 'TRIFASICO';
+  else if (/bif[áa]sic/i.test(texto)) f.ligacao = 'BIFASICO';
+  else if (/monof[áa]sic/i.test(texto)) f.ligacao = 'MONOFASICO';
+
+  f.icmsAliquota = num(buscar(/icms[^\d\n]*?([\d.,]+)\s*%/i, texto));
+  f.multa = num(buscar(/multa[^\n]*?r\$\s*([\d.,]+)/i, texto));
+  f.juros = num(buscar(/juros[^\n]*?r\$\s*([\d.,]+)/i, texto));
+
+  if (/energia\s+injetada|cr[ée]ditos?\s+de\s+energia|micro\s*gera[çc][ãa]o|gera[çc][ãa]o\s+distribu[íi]da/i.test(texto)){
+    f.possuiGeracaoDistribuida = true;
+  }
+
+  let total = buscar(/total\s+a\s+pagar[^\d\n]*?r\$\s*([\d.,]+)/i, texto);
+  if (!total) total = buscar(/valor\s+total[^\d\n]*?r\$\s*([\d.,]+)/i, texto);
+  f.valorTotal = num(total);
+
+  f.historico = extrairHistorico(texto);
+
+  const camposChave = [f.consumoKwh, f.valorTotal, f.dataVencimento, f.grupo !== 'DESCONHECIDO'];
+  f.confianca = camposChave.filter(Boolean).length / camposChave.length;
+
+  return f;
+}
+
+function extrairHistorico(texto){
+  const historico = [];
+  const re = /(jan|fev|mar|abr|mai|jun|jul|ago|set|out|nov|dez)[\/\s]*(\d{2,4})\D{0,15}?(\d{2,5})/gi;
+  let m;
+  while ((m = re.exec(texto)) !== null){
+    const consumo = parseFloat(m[3]);
+    if (consumo > 0 && consumo < 100000){
+      historico.push({mesAno: `${m[1].toLowerCase()}/${m[2]}`, consumoKwh: consumo});
+    }
+    if (historico.length >= 12) break;
+  }
+  return historico;
+}
+
+// ---------- REGRAS ----------
+
+function analisar(f){
+  const achados = [];
+
+  if (f.fatorPotencia !== null && f.fatorPotencia < 0.92){
+    achados.push({
+      titulo: "Fator de potência abaixo do mínimo regulatório (0,92)",
+      severidade: "CRITICO", categoria: "Energia Reativa",
+      descricao: `O fator de potência registrado é ${f.fatorPotencia.toFixed(2)}, abaixo do mínimo de 0,92 exigido pela ANEEL (REN 1000/2021). Isso gera cobrança de energia reativa excedente (UFER) na fatura.`,
+      recomendacao: "Instalar ou dimensionar corretamente banco de capacitores para correção do fator de potência. Normalmente o retorno do investimento é rápido, pois elimina a cobrança recorrente de reativo excedente.",
+      economia: "Pode eliminar 100% do valor cobrado por reativo excedente."
+    });
+  }
+
+  if (f.valorCobradoReativo > 0){
+    achados.push({
+      titulo: "Cobrança de energia reativa excedente (UFER)",
+      severidade: "ALERTA", categoria: "Energia Reativa",
+      descricao: `Foi identificado valor de R$ ${f.valorCobradoReativo.toLocaleString('pt-BR', {minimumFractionDigits:2})} referente a energia reativa excedente nesta fatura.`,
+      recomendacao: "Avaliar correção do fator de potência com banco de capacitores."
+    });
+  }
+
+  if (f.demandaContratadaKw && f.demandaMedidaKw){
+    if (f.demandaMedidaKw > f.demandaContratadaKw * 1.05){
+      const pct = (f.demandaMedidaKw / f.demandaContratadaKw - 1) * 100;
+      achados.push({
+        titulo: "Demanda medida acima da contratada",
+        severidade: "CRITICO", categoria: "Demanda",
+        descricao: `Demanda contratada: ${f.demandaContratadaKw.toFixed(0)} kW. Demanda medida: ${f.demandaMedidaKw.toFixed(0)} kW (${pct.toFixed(1)}% acima). Isso gera multa por ultrapassagem, tarifada a um valor muito mais alto que a demanda normal.`,
+        recomendacao: "Revisar o contrato de demanda junto à distribuidora, considerando ajustar a demanda contratada para refletir o uso real, ou revisar processos/operação para reduzir os picos de demanda."
+      });
+    } else if (f.demandaMedidaKw < f.demandaContratadaKw * 0.7){
+      const pct = (1 - f.demandaMedidaKw / f.demandaContratadaKw) * 100;
+      achados.push({
+        titulo: "Demanda contratada superdimensionada (ociosidade alta)",
+        severidade: "OPORTUNIDADE", categoria: "Demanda",
+        descricao: `A demanda medida (${f.demandaMedidaKw.toFixed(0)} kW) está ${pct.toFixed(0)}% abaixo da contratada (${f.demandaContratadaKw.toFixed(0)} kW). Isso significa pagamento por capacidade não utilizada todos os meses.`,
+        recomendacao: "Avaliar redução da demanda contratada junto à distribuidora (respeitando os limites/janelas regulatórias de alteração de contrato).",
+        economia: "Proporcional ao kW não utilizado todo mês."
+      });
+    }
+  }
+  if (f.ultrapassagemKw > 0){
+    achados.push({
+      titulo: "Multa por ultrapassagem de demanda identificada",
+      severidade: "CRITICO", categoria: "Demanda",
+      descricao: `Ultrapassagem de ${f.ultrapassagemKw.toFixed(0)} kW cobrada na fatura.`,
+      recomendacao: "Verificar se a demanda contratada está bem dimensionada para o perfil de uso."
+    });
+  }
+
+  if (f.grupo === 'A' && f.demandaContratadaKw && f.demandaContratadaKw >= 30){
+    achados.push({
+      titulo: "Possível elegibilidade para o Mercado Livre de Energia (ACL)",
+      severidade: "OPORTUNIDADE", categoria: "Mercado Livre",
+      descricao: `Unidade do Grupo A com demanda contratada de ${f.demandaContratadaKw.toFixed(0)} kW. Consumidores do Grupo A em geral podem migrar para o Mercado Livre, normalmente com economia relevante na conta de energia.`,
+      recomendacao: "Buscar uma comercializadora ou consultoria especializada para simular a migração para o Mercado Livre e calcular a economia real frente ao contrato atual.",
+      economia: "Tipicamente entre 10% e 35%, a confirmar com simulação específica."
+    });
+  }
+
+  if (f.grupo === 'B' && !f.possuiGeracaoDistribuida && f.consumoKwh && f.consumoKwh >= 200){
+    achados.push({
+      titulo: "Oportunidade de energia solar (geração distribuída)",
+      severidade: "OPORTUNIDADE", categoria: "Solar",
+      descricao: `Consumo médio mensal de aproximadamente ${f.consumoKwh.toFixed(0)} kWh, sem geração própria identificada. Para esse patamar de consumo, um sistema fotovoltaico (próprio ou por assinatura/aluguel de energia) tende a gerar economia relevante na conta de luz.`,
+      recomendacao: "Solicitar simulação de dimensionamento de sistema solar (próprio ou em modelo de assinatura) com base no histórico de consumo e na irradiação solar local.",
+      economia: "Tipicamente entre 20% e 95% da fatura, dependendo do modelo escolhido."
+    });
+  }
+
+  if (f.grupo === 'B' && f.subgrupo === 'B1' && f.modalidade === 'CONVENCIONAL'){
+    achados.push({
+      titulo: "Avaliar elegibilidade para Tarifa Branca",
+      severidade: "OPORTUNIDADE", categoria: "Tarifa Branca",
+      descricao: "Unidade residencial (B1) na modalidade convencional. Se o consumo for concentrado fora do horário de ponta (geralmente 17h–22h em dias úteis), a Tarifa Branca pode reduzir o valor pago.",
+      recomendacao: "Analisar o perfil horário de consumo antes de migrar. Se a casa consome muito durante o horário de ponta, a Tarifa Branca pode ser desvantajosa."
+    });
+  }
+
+  if (['VERMELHA_P1','VERMELHA_P2','ESCASSEZ_HIDRICA'].includes(f.bandeira)){
+    achados.push({
+      titulo: "Bandeira tarifária elevada aplicada",
+      severidade: "INFO", categoria: "Bandeira Tarifária",
+      descricao: `Fatura cobrada com bandeira ${f.bandeira.replace('_',' ')}. Vale confirmar no site da ANEEL se a bandeira vigente no mês de referência corresponde à aplicada na fatura.`,
+      recomendacao: "Conferir a bandeira tarifária oficial do mês no site da ANEEL/CCEE."
+    });
+  }
+
+  if (f.multa || f.juros){
+    const valor = (f.multa||0)+(f.juros||0);
+    achados.push({
+      titulo: "Cobrança de multa/juros por atraso",
+      severidade: "ALERTA", categoria: "Encargos Financeiros",
+      descricao: `Identificado total de R$ ${valor.toLocaleString('pt-BR',{minimumFractionDigits:2})} em multa/juros nesta fatura.`,
+      recomendacao: "Verificar se o pagamento anterior foi feito dentro do prazo; se houve atraso indevidamente registrado, contestar junto à distribuidora."
+    });
+  }
+
+  const valoresHist = f.historico.map(h => h.consumoKwh).filter(Boolean);
+  if (valoresHist.length >= 4){
+    const media = valoresHist.reduce((a,b)=>a+b,0) / valoresHist.length;
+    const pico = f.historico.find(h => h.consumoKwh > media * 2.5);
+    if (pico){
+      achados.push({
+        titulo: `Pico anômalo de consumo em ${pico.mesAno}`,
+        severidade: "ALERTA", categoria: "Histórico de Consumo",
+        descricao: `Consumo de ${pico.consumoKwh.toFixed(0)} kWh em ${pico.mesAno}, muito acima da média do período analisado (${media.toFixed(0)} kWh). Pode indicar erro de leitura, equipamento com defeito, ou consumo atípico real.`,
+        recomendacao: "Investigar a causa do pico; se for erro de leitura, solicitar revisão à distribuidora."
+      });
+    }
+  }
+
+  if (f.confianca < 0.5){
+    achados.push({
+      titulo: "Extração de dados com confiança baixa",
+      severidade: "INFO", categoria: "Qualidade da Extração",
+      descricao: "Não foi possível extrair com segurança vários campos-chave desta fatura (possivelmente por baixa qualidade da imagem/print ou layout não padronizado). As análises acima consideram apenas o que pôde ser lido.",
+      recomendacao: "Se possível, reenviar o PDF original da fatura (não o print) para uma análise mais completa."
+    });
+  }
+
+  const ordem = {CRITICO:0, ALERTA:1, OPORTUNIDADE:2, INFO:3};
+  achados.sort((a,b) => ordem[a.severidade]-ordem[b.severidade]);
+  return achados;
+}
+
+// ---------- RENDER ----------
+
+function renderReport(f, achados){
+  const n = sev => achados.filter(a=>a.severidade===sev).length;
+  document.getElementById('summaryGrid').innerHTML = `
+    <div class="metric crit"><div class="n">${n('CRITICO')}</div><div class="l">Críticos</div></div>
+    <div class="metric alert"><div class="n">${n('ALERTA')}</div><div class="l">Alertas</div></div>
+    <div class="metric opp"><div class="n">${n('OPORTUNIDADE')}</div><div class="l">Oportunidades</div></div>
+    <div class="metric"><div class="n">${achados.length}</div><div class="l">Total analisado</div></div>
+  `;
+
+  const dados = [
+    ['Distribuidora', f.distribuidora || 'Não identificada'],
+    ['UF', f.uf || '—'],
+    ['Vencimento', f.dataVencimento || '—'],
+    ['Grupo tarifário', f.grupo],
+    ['Subgrupo', f.subgrupo || '—'],
+    ['Modalidade tarifária', f.modalidade],
+    ['Tipo de ligação', f.ligacao],
+    ['Consumo (kWh)', f.consumoKwh !== null ? f.consumoKwh : 'Não identificado'],
+    ['Demanda contratada (kW)', f.demandaContratadaKw !== null ? f.demandaContratadaKw : '—'],
+    ['Demanda medida (kW)', f.demandaMedidaKw !== null ? f.demandaMedidaKw : '—'],
+    ['Fator de potência', f.fatorPotencia !== null ? f.fatorPotencia.toFixed(2) : '—'],
+    ['Bandeira tarifária', f.bandeira],
+    ['Possui geração solar/distribuída', f.possuiGeracaoDistribuida ? 'Sim' : 'Não'],
+    ['Valor total da fatura', f.valorTotal !== null ? 'R$ ' + f.valorTotal.toLocaleString('pt-BR',{minimumFractionDigits:2}) : 'Não identificado'],
+  ];
+  document.getElementById('dadosTable').innerHTML = dados.map(([k,v]) =>
+    `<tr><td>${k}</td><td>${v}</td></tr>`).join('');
+
+  const secoes = [
+    ['CRITICO', 'Problemas críticos', 'crit'],
+    ['ALERTA', 'Alertas', 'alert'],
+    ['OPORTUNIDADE', 'Oportunidades de economia', 'opp'],
+    ['INFO', 'Observações', 'info'],
+  ];
+
+  let html = '';
+  for (const [sev, titulo, dotClass] of secoes){
+    const itens = achados.filter(a => a.severidade === sev);
+    if (!itens.length) continue;
+    html += `<div class="section-title"><span class="dot ${dotClass}"></span>${titulo}</div>`;
+    for (const a of itens){
+      html += `
+        <div class="achado ${a.severidade}">
+          <div class="achado-head">
+            <span class="tag ${a.severidade}">${a.severidade}</span>
+            <span class="cat">${a.categoria}</span>
+          </div>
+          <h4>${a.titulo}</h4>
+          <p>${a.descricao}</p>
+          <div class="rec"><strong>Recomendação:</strong> ${a.recomendacao}</div>
+          ${a.economia ? `<div class="eco">${a.economia}</div>` : ''}
+        </div>`;
+    }
+  }
+  document.getElementById('achadosContainer').innerHTML = html;
+}
+</script>
+</body>
+</html>
